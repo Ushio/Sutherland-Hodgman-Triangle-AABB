@@ -19,6 +19,12 @@ inline T ss_min(T x, T y)
 {
     return (y < x) ? y : x;
 }
+template <class T>
+inline T ss_clamp(T x, T lower, T upper)
+{
+    return ss_min(ss_max(x, lower), upper);
+}
+
 
 template <class V3>
 struct AABB
@@ -77,6 +83,44 @@ inline AABB<glm::vec3> clip(const AABB<glm::vec3>& baseAABB, glm::vec3 a, glm::v
         }
     }
     return baseAABB.intersect(divided);
+}
+
+inline void divide_clip(AABB<glm::vec3>* L, AABB<glm::vec3>* R, const AABB<glm::vec3>& baseAABB, glm::vec3 a, glm::vec3 b, glm::vec3 c, float boundary, int axis, int nEps)
+{
+    L->set_empty();
+    R->set_empty();
+    glm::vec3 vs[] = { a, b, c };
+    for (int i = 0; i < 3; i++)
+    {
+        glm::vec3 ro = vs[i];
+        glm::vec3 rd = vs[(i + 1) % 3] - ro;
+        float one_over_rd = ss_clamp(1.0f / rd[axis], -FLT_MAX, FLT_MAX);
+        float t = (boundary - ro[axis]) * one_over_rd;
+        if (ro[axis] - boundary < 0.0f)
+        {
+            L->extend(ro);
+        }
+        else
+        {
+            R->extend(ro);
+        }
+
+        if (0.0f < t && t < 1.0f)
+        {
+            glm::vec3 p = ro + rd * t;
+
+            float bias = ss_max(fabsf(p[axis] * FLT_EPSILON), FLT_MIN) * nEps;
+            glm::vec3 pL = p;
+            glm::vec3 pR = p;
+            pL[axis] += bias;
+            pR[axis] -= bias;
+
+            L->extend(pL);
+            R->extend(pR);
+        }
+    }
+    *L = baseAABB.intersect(*L);
+    *R = baseAABB.intersect(*R);
 }
 
 int main() {
@@ -251,7 +295,25 @@ int main() {
             DrawAABB(clipped.lower, clipped.upper, { 0, 255, 255 }, 2);
         }
 
+        static bool divide_demo = false;
+        if (divide_demo)
+        {
+            float b = 0.5f + sin(GetElapsedTime()) * 0.4f;
+            int axis = 0;
 
+            glm::vec3 axis_vector = {};
+            axis_vector[axis] = 1.0f;
+            glm::vec3 t0, t1;
+            GetOrthonormalBasis(axis_vector, &t0, &t1);
+
+            DrawFreeGrid(axis_vector * b, t0, t1, 2, { 200, 200, 200 });
+
+            AABB<glm::vec3> L, R;
+            divide_clip(&L, &R, { lower, upper }, vs[0], vs[1], vs[2], b, axis, 1024);
+            DrawAABB(L.lower, L.upper, { 255, 0, 0 }, 2);
+            DrawAABB(R.lower, R.upper, { 0, 255, 0 }, 2);
+
+        }
 
         PopGraphicState();
         EndCamera();
@@ -263,6 +325,7 @@ int main() {
         ImGui::Text("fps = %f", GetFrameRate());
         ImGui::Checkbox("sutherland hodgman (yellow)", &sutherland_hodgman);
         ImGui::Checkbox("incremental divide (cyan)", &incremental_divide);
+        ImGui::Checkbox("divide demo", &divide_demo);
 
         ImGui::End();
 
