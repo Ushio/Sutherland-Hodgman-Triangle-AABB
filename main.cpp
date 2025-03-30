@@ -60,7 +60,7 @@ struct AABB
     }
 };
 
-inline AABB<glm::vec3> clip(const AABB<glm::vec3>& baseAABB, glm::vec3 a, glm::vec3 b, glm::vec3 c, float boundary, int axis, float dir )
+inline AABB<glm::vec3> clip(const AABB<glm::vec3>& baseAABB, glm::vec3 a, glm::vec3 b, glm::vec3 c, float boundary, int axis, float dir, int nEps)
 {
     AABB<glm::vec3> divided;
     divided.set_empty();
@@ -76,9 +76,13 @@ inline AABB<glm::vec3> clip(const AABB<glm::vec3>& baseAABB, glm::vec3 a, glm::v
             divided.extend(ro);
         }
 
-        if (0.0f < t && t < 1.0f)
+        if (-FLT_EPSILON * nEps < t && t < 1.0f + FLT_EPSILON * nEps)
         {
             glm::vec3 p = ro + rd * t;
+
+            // move p for conservative clipping
+            p[axis] -= ss_max(fabsf(p[axis] * FLT_EPSILON), FLT_MIN) * nEps * dir;
+
             divided.extend(p);
         }
     }
@@ -105,10 +109,11 @@ inline void divide_clip(AABB<glm::vec3>* L, AABB<glm::vec3>* R, const AABB<glm::
             R->extend(ro);
         }
 
-        if (0.0f < t && t < 1.0f)
+        if (-FLT_EPSILON * nEps < t && t < 1.0f + FLT_EPSILON * nEps)
         {
             glm::vec3 p = ro + rd * t;
 
+            // move p for conservative clipping
             float bias = ss_max(fabsf(p[axis] * FLT_EPSILON), FLT_MIN) * nEps;
             glm::vec3 pL = p;
             glm::vec3 pR = p;
@@ -168,8 +173,6 @@ int main() {
             { rng.uniformf(), rng.uniformf(), rng.uniformf()},
             { rng.uniformf(), rng.uniformf(), rng.uniformf()},
         };
-
-        vs[2].z = vs[0].z;
 
         for (int i = 0; i < 3; i++)
         {
@@ -289,17 +292,21 @@ int main() {
             AABB<glm::vec3> clipped = { lower, upper };
             for (int axis = 0; axis < 3; axis++)
             {
-                clipped = clip(clipped, vs[0], vs[1], vs[2], lower[axis], axis, +1.0f);
-                clipped = clip(clipped, vs[0], vs[1], vs[2], upper[axis], axis, -1.0f);
+                clipped = clip(clipped, vs[0], vs[1], vs[2], lower[axis], axis, +1.0f, 64);
+                clipped = clip(clipped, vs[0], vs[1], vs[2], upper[axis], axis, -1.0f, 64);
             }
+            auto s = clipped.upper - clipped.lower;
             DrawAABB(clipped.lower, clipped.upper, { 0, 255, 255 }, 2);
         }
 
+        static float b = 0.164967000f;
         static bool divide_demo = false;
         if (divide_demo)
         {
-            float b = 0.5f + sin(GetElapsedTime()) * 0.4f;
-            int axis = 0;
+            //float b = 0.5f + sin(GetElapsedTime()) * 0.4f;
+            //int axis = 0;
+            
+            int axis = 1;
 
             glm::vec3 axis_vector = {};
             axis_vector[axis] = 1.0f;
@@ -313,6 +320,9 @@ int main() {
             DrawAABB(L.lower, L.upper, { 255, 0, 0 }, 2);
             DrawAABB(R.lower, R.upper, { 0, 255, 0 }, 2);
 
+            //AABB<glm::vec3> L;
+            //L = clip({ lower, upper }, vs[0], vs[1], vs[2], b, axis, 1.0f, 1024);
+            //DrawAABB(L.lower, L.upper, { 255, 0, 0 }, 2);
         }
 
         PopGraphicState();
@@ -326,6 +336,7 @@ int main() {
         ImGui::Checkbox("sutherland hodgman (yellow)", &sutherland_hodgman);
         ImGui::Checkbox("incremental divide (cyan)", &incremental_divide);
         ImGui::Checkbox("divide demo", &divide_demo);
+        ImGui::SliderFloat("b", &b, -1, 1);
 
         ImGui::End();
 
