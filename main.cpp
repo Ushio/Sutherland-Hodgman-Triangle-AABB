@@ -7,6 +7,78 @@ float compMin(glm::vec3 v) {
 float compMax(glm::vec3 v) {
     return glm::max(glm::max(v.x, v.y), v.z);
 }
+
+template <class T>
+inline T ss_max(T x, T y)
+{
+    return (x < y) ? y : x;
+}
+
+template <class T>
+inline T ss_min(T x, T y)
+{
+    return (y < x) ? y : x;
+}
+
+template <class V3>
+struct AABB
+{
+    V3 lower;
+    V3 upper;
+
+    void set_empty()
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            lower[i] = +FLT_MAX;
+            upper[i] = -FLT_MAX;
+        }
+    }
+    void extend(const V3& p)
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            lower[i] = ss_min(lower[i], p[i]);
+            upper[i] = ss_max(upper[i], p[i]);
+        }
+    }
+    AABB<V3> intersect(const AABB<V3>& rhs) const
+    {
+        AABB<V3> I;
+        for (int i = 0; i < 3; i++)
+        {
+            I.lower[i] = ss_max(lower[i], rhs.lower[i]);
+            I.upper[i] = ss_min(upper[i], rhs.upper[i]);
+        }
+        return I;
+    }
+};
+
+inline AABB<glm::vec3> clip(const AABB<glm::vec3>& baseAABB, glm::vec3 a, glm::vec3 b, glm::vec3 c, float boundary, int axis, float dir )
+{
+    AABB<glm::vec3> divided;
+    divided.set_empty();
+    glm::vec3 vs[] = { a, b, c };
+    for (int i = 0; i < 3; i++)
+    {
+        glm::vec3 ro = vs[i];
+        glm::vec3 rd = vs[(i + 1) % 3] - ro;
+        float one_over_rd = glm::clamp(1.0f / rd[axis], -FLT_MAX, FLT_MAX);
+        float t = (boundary - ro[axis]) * one_over_rd;
+        if (0.0f <= (ro[axis] - boundary) * dir)
+        {
+            divided.extend(ro);
+        }
+
+        if (0.0f < t && t < 1.0f)
+        {
+            glm::vec3 p = ro + rd * t;
+            divided.extend(p);
+        }
+    }
+    return baseAABB.intersect(divided);
+}
+
 int main() {
     using namespace pr;
 
@@ -60,150 +132,126 @@ int main() {
             DrawLine(vs[i], vs[(i + 1) % 3], {255, 0, 0});
         }
 
-
+        static bool sutherland_hodgman = true;
         
-        std::vector<glm::vec3> xs_inputs(vs, vs + 3);
-        std::vector<glm::vec3> xs_outputs;
-
-        for (int axis = 0; axis < 3; axis++)
+        if (sutherland_hodgman)
         {
-            // lower clip
-            for (int i = 0; i < xs_inputs.size(); i++)
-            {
-                glm::vec3 a = xs_inputs[i];
-                glm::vec3 b = xs_inputs[(i + 1) % xs_inputs.size()];
+            std::vector<glm::vec3> xs_inputs(vs, vs + 3);
+            std::vector<glm::vec3> xs_outputs;
 
-                bool inside_a = lower[axis] < a[axis];
-                bool inside_b = lower[axis] < b[axis];
-                if (inside_a && inside_b) // in -> in 
+            for (int axis = 0; axis < 3; axis++)
+            {
+                // lower clip
+                for (int i = 0; i < xs_inputs.size(); i++)
                 {
-                    xs_outputs.push_back(b);
+                    glm::vec3 a = xs_inputs[i];
+                    glm::vec3 b = xs_inputs[(i + 1) % xs_inputs.size()];
+
+                    bool inside_a = lower[axis] < a[axis];
+                    bool inside_b = lower[axis] < b[axis];
+                    if (inside_a && inside_b) // in -> in 
+                    {
+                        xs_outputs.push_back(b);
+                    }
+                    if (inside_a == false && inside_b == false) // out -> out
+                    {
+                        continue;
+                    }
+                    if (inside_a && inside_b == false) // in -> out
+                    {
+                        glm::vec3 rd = b - a;
+                        float one_over_rd = glm::clamp(1.0f / rd[axis], -FLT_MAX, FLT_MAX);
+                        float t = (lower[axis] - a[axis]) * one_over_rd;
+                        glm::vec3 v = a + rd * t;
+                        xs_outputs.push_back(v);
+                    }
+                    if (inside_a == false && inside_b) // out -> in
+                    {
+                        glm::vec3 rd = b - a;
+                        float one_over_rd = glm::clamp(1.0f / rd[axis], -FLT_MAX, FLT_MAX);
+                        float t = (lower[axis] - a[axis]) * one_over_rd;
+                        glm::vec3 v = a + rd * t;
+                        xs_outputs.push_back(v);
+                        xs_outputs.push_back(b);
+                    }
                 }
-                if (inside_a == false && inside_b == false) // out -> out
+
+                xs_inputs = xs_outputs;
+                xs_outputs.clear();
+
+                // Upper clip
+                for (int i = 0; i < xs_inputs.size(); i++)
                 {
-                    continue;
+                    glm::vec3 a = xs_inputs[i];
+                    glm::vec3 b = xs_inputs[(i + 1) % xs_inputs.size()];
+
+                    bool inside_a = a[axis] < upper[axis];
+                    bool inside_b = b[axis] < upper[axis];
+                    if (inside_a && inside_b) // in -> in 
+                    {
+                        xs_outputs.push_back(b);
+                    }
+                    if (inside_a == false && inside_b == false) // out -> out
+                    {
+                        continue;
+                    }
+                    if (inside_a && inside_b == false) // in -> out
+                    {
+                        glm::vec3 rd = b - a;
+                        float one_over_rd = glm::clamp(1.0f / rd[axis], -FLT_MAX, FLT_MAX);
+                        float t = (upper[axis] - a[axis]) * one_over_rd;
+                        glm::vec3 v = a + rd * t;
+                        xs_outputs.push_back(v);
+                    }
+                    if (inside_a == false && inside_b) // out -> in
+                    {
+                        glm::vec3 rd = b - a;
+                        float one_over_rd = glm::clamp(1.0f / rd[axis], -FLT_MAX, FLT_MAX);
+                        float t = (upper[axis] - a[axis]) * one_over_rd;
+                        glm::vec3 v = a + rd * t;
+                        xs_outputs.push_back(v);
+                        xs_outputs.push_back(b);
+                    }
                 }
-                if (inside_a && inside_b == false) // in -> out
-                {
-                    glm::vec3 rd = b - a;
-                    float one_over_rd = glm::clamp(1.0f / rd[axis], -FLT_MAX, FLT_MAX);
-                    float t = (lower[axis] - a[axis]) * one_over_rd;
-                    glm::vec3 v = a + rd * t;
-                    xs_outputs.push_back(v);
-                }
-                if (inside_a == false && inside_b) // out -> in
-                {
-                    glm::vec3 rd = b - a;
-                    float one_over_rd = glm::clamp(1.0f / rd[axis], -FLT_MAX, FLT_MAX);
-                    float t = (lower[axis] - a[axis]) * one_over_rd;
-                    glm::vec3 v = a + rd * t;
-                    xs_outputs.push_back(v);
-                    xs_outputs.push_back(b);
-                }
+                xs_inputs = xs_outputs;
+                xs_outputs.clear();
             }
 
-            xs_inputs = xs_outputs;
-            xs_outputs.clear();
-
-            // Upper clip
-            for (int i = 0; i < xs_inputs.size(); i++)
+            if (!xs_inputs.empty())
             {
-                glm::vec3 a = xs_inputs[i];
-                glm::vec3 b = xs_inputs[(i + 1) % xs_inputs.size()];
-
-                bool inside_a = a[axis] < upper[axis];
-                bool inside_b = b[axis] < upper[axis];
-                if (inside_a && inside_b) // in -> in 
+                PrimBegin(PrimitiveMode::LineStrip, 2);
+                for (int i = 0; i < xs_inputs.size() + 1; i++)
                 {
-                    xs_outputs.push_back(b);
+                    PrimVertex(xs_inputs[i % xs_inputs.size()], { 255, 255, 0 });
                 }
-                if (inside_a == false && inside_b == false) // out -> out
-                {
-                    continue;
-                }
-                if (inside_a && inside_b == false) // in -> out
-                {
-                    glm::vec3 rd = b - a;
-                    float one_over_rd = glm::clamp(1.0f / rd[axis], -FLT_MAX, FLT_MAX);
-                    float t = (upper[axis] - a[axis]) * one_over_rd;
-                    glm::vec3 v = a + rd * t;
-                    xs_outputs.push_back(v);
-                }
-                if (inside_a == false && inside_b) // out -> in
-                {
-                    glm::vec3 rd = b - a;
-                    float one_over_rd = glm::clamp(1.0f / rd[axis], -FLT_MAX, FLT_MAX);
-                    float t = (upper[axis] - a[axis]) * one_over_rd;
-                    glm::vec3 v = a + rd * t;
-                    xs_outputs.push_back(v);
-                    xs_outputs.push_back(b);
-                }
+                PrimEnd();
             }
-            xs_inputs = xs_outputs;
-            xs_outputs.clear();
-        }
 
-        if (!xs_inputs.empty())
-        {
-            PrimBegin(PrimitiveMode::LineStrip);
-            for (int i = 0; i < xs_inputs.size() + 1; i++)
+            AABB<glm::vec3> clipped;
+            clipped.set_empty();
+
+            for (auto p : xs_inputs)
             {
-                PrimVertex(xs_inputs[i % xs_inputs.size()], { 255, 255, 0 });
+                clipped.extend(p);
             }
-            PrimEnd();
+            DrawAABB(clipped.lower, clipped.upper, { 255, 255, 0 });
         }
 
-        glm::vec3 clipped_lower = { FLT_MAX ,FLT_MAX, FLT_MAX };
-        glm::vec3 clipped_upper = { -FLT_MAX ,-FLT_MAX, -FLT_MAX };
+        // Binned SAH Kd-Tree Construction on a GPU
+        static bool incremental_divide = true;
 
-        for (auto p : xs_inputs)
+        if (incremental_divide)
         {
-            clipped_lower = glm::min(clipped_lower, p);
-            clipped_upper = glm::max(clipped_upper, p);
+            AABB<glm::vec3> clipped = { lower, upper };
+            for (int axis = 0; axis < 3; axis++)
+            {
+                clipped = clip(clipped, vs[0], vs[1], vs[2], lower[axis], axis, +1.0f);
+                clipped = clip(clipped, vs[0], vs[1], vs[2], upper[axis], axis, -1.0f);
+            }
+            DrawAABB(clipped.lower, clipped.upper, { 0, 255, 255 }, 2);
         }
-        //for (int i = 0; i < 3; i++)
-        //{
-        //    glm::vec3 ro = vs[i];
-        //    glm::vec3 rd = vs[(i + 1) % 3] - ro;
-        //    glm::vec3 one_over_rd = glm::clamp(1.0f / rd, -FLT_MAX, FLT_MAX);
-        //    glm::vec3 t0 = (lower - ro) * one_over_rd;
-        //    glm::vec3 t1 = (upper - ro) * one_over_rd;
-        //    glm::vec3 tmin = min(t0, t1);
-        //    glm::vec3 tmax = max(t0, t1);
 
-        //    float region_min = compMax(tmin);
-        //    float region_max = compMin(tmax);
 
-        //    if(region_min <= 0.0f && 0.0f <= region_max ) // the origin is included 
-        //    {
-        //        clipped_lower = glm::min(clipped_lower, ro);
-        //        clipped_upper = glm::max(clipped_upper, ro);
-        //        DrawSphere(ro, 0.02f, { 255, 0, 0 });
-        //        DrawText(ro, std::to_string(i));
-        //    }
-        //    if( region_min <= region_max ) // the segment contacts the box volume
-        //    {
-        //        if (0.0f < region_min && region_min < 1.0f) // the edge contacts box surface
-        //        {
-        //            glm::vec3 p_min = ro + rd * region_min;
-        //            clipped_lower = glm::min(clipped_lower, p_min);
-        //            clipped_upper = glm::max(clipped_upper, p_min);
-        //            DrawSphere(p_min, 0.01f, { 0, 255, 0 });
-        //            DrawText(p_min, std::to_string(i));
-        //        }
-        //        if (0.0f < region_max && region_max < 1.0f) // the edge contacts box surface
-        //        {
-        //            glm::vec3 p_max = ro + rd * region_max;
-        //            clipped_lower = glm::min(clipped_lower, p_max);
-        //            clipped_upper = glm::max(clipped_upper, p_max);
-
-        //            DrawSphere(p_max, 0.01f, { 0, 0, 255 });
-        //            DrawText(p_max, std::to_string(i));
-        //        }
-        //    }
-        //}
-
-        DrawAABB(clipped_lower, clipped_upper, { 255,0,255 });
 
         PopGraphicState();
         EndCamera();
@@ -213,6 +261,8 @@ int main() {
         ImGui::SetNextWindowSize({ 500, 800 }, ImGuiCond_Once);
         ImGui::Begin("Panel");
         ImGui::Text("fps = %f", GetFrameRate());
+        ImGui::Checkbox("sutherland hodgman (yellow)", &sutherland_hodgman);
+        ImGui::Checkbox("incremental divide (cyan)", &incremental_divide);
 
         ImGui::End();
 
