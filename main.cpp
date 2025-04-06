@@ -58,6 +58,14 @@ struct AABB
         }
         return I;
     }
+    void growEps(int nEps)
+    {
+        for (int i = 0; i < 3; i++)
+        {
+            lower[i] -= ss_max(fabsf(lower[i] * FLT_EPSILON), FLT_MIN) * nEps;
+            upper[i] += ss_max(fabsf(upper[i] * FLT_EPSILON), FLT_MIN) * nEps;
+        }
+    }
 };
 
 inline AABB<glm::vec3> clip(const AABB<glm::vec3>& baseAABB, glm::vec3 a, glm::vec3 b, glm::vec3 c, float boundary, int axis, float dir, int nEps)
@@ -111,19 +119,16 @@ inline void divide_clip(AABB<glm::vec3>* L, AABB<glm::vec3>* R, const AABB<glm::
 
         if (-FLT_EPSILON * nEps < t && t < 1.0f + FLT_EPSILON * nEps)
         {
-            glm::vec3 p = ro + rd * t;
-
-            // move p for conservative clipping
-            float bias = ss_max(fabsf(p[axis] * FLT_EPSILON), FLT_MIN) * nEps;
-            glm::vec3 pL = p;
-            glm::vec3 pR = p;
-            pL[axis] += bias;
-            pR[axis] -= bias;
-
-            L->extend(pL);
-            R->extend(pR);
+            glm::vec3 p = ro + rd * ss_clamp(t, 0.0f, 1.0f);
+            L->extend(p);
+            R->extend(p);
         }
     }
+
+    // conservative bound for axis-aligned element
+    L->growEps(nEps);
+    R->growEps(nEps);
+
     *L = baseAABB.intersect(*L);
     *R = baseAABB.intersect(*R);
 }
